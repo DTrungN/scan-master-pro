@@ -1,0 +1,529 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Scan Master Pro</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        slate: {
+                            950: '#020617', 
+                        },
+                        leica: {
+                            red: '#D32F2F', 
+                        },
+                        nikon: {
+                            blue: '#007ACC', 
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- Three.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+
+    <style>
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: #0f172a; }
+        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #475569; }
+        .theme-leica .accent-text { color: #D32F2F; }
+        .theme-leica .accent-bg { background-color: #D32F2F; }
+        .theme-leica .accent-border { border-color: #D32F2F; }
+        .theme-nikon .accent-text { color: #007ACC; }
+        .theme-nikon .accent-bg { background-color: #007ACC; }
+        .theme-nikon .accent-border { border-color: #007ACC; }
+        /* Default fallback */
+        .accent-bg { background-color: #334155; } 
+        .tab-active { background-color: #1e293b; color: white; border-bottom: 2px solid currentColor; }
+    </style>
+</head>
+<body class="bg-slate-950 text-slate-200 font-sans h-screen flex flex-col overflow-hidden transition-colors duration-500" id="app-body">
+    
+    <!-- Top Bar -->
+    <header class="h-12 bg-slate-900 border-b border-slate-800 flex items-center justify-between px-4 select-none shrink-0">
+        <div class="flex items-center gap-2">
+            <i data-lucide="scan-line" class="w-5 h-5 accent-text"></i>
+            <span class="font-bold text-lg tracking-wide">SCAN MASTER <span class="accent-text font-light">PRO</span></span>
+        </div>
+        
+        <div class="flex items-center gap-4 text-sm">
+            <div id="connection-status" class="flex items-center gap-2 px-3 py-1 rounded bg-slate-800 border border-slate-700">
+                <div class="w-2 h-2 rounded-full bg-gray-500" id="status-dot"></div>
+                <span id="device-name">Disconnected</span>
+            </div>
+        </div>
+    </header>
+
+    <!-- Toast Notification -->
+    <div id="toast-container" class="fixed top-16 right-4 z-50 flex flex-col gap-2 pointer-events-none">
+        <!-- Toast Item (Template) -->
+        <div id="disconnect-toast" class="hidden bg-red-900/90 border border-red-500 text-white px-4 py-3 rounded-lg shadow-lg backdrop-blur-sm flex items-center gap-3 animate-bounce">
+            <i data-lucide="wifi-off" class="w-6 h-6"></i>
+            <div>
+                <h4 class="font-bold text-sm">Device Disconnected</h4>
+                <p class="text-xs text-red-200">Please check connection.</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Workspace -->
+    <main class="flex-1 flex overflow-hidden">
+        
+        <!-- Sidebar Navigation -->
+        <aside class="w-16 bg-slate-900 border-r border-slate-800 flex flex-col items-center py-4 gap-4 shrink-0 z-10">
+            <button class="p-3 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition-colors tab-btn active" data-tab="scan" title="Scan">
+                <i data-lucide="camera" class="w-6 h-6"></i>
+            </button>
+            <button class="p-3 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition-colors tab-btn" data-tab="history" title="History">
+                <i data-lucide="history" class="w-6 h-6"></i>
+            </button>
+            <button class="p-3 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition-colors tab-btn" data-tab="3d" title="3D View">
+                <i data-lucide="box" class="w-6 h-6"></i>
+            </button>
+            <div class="mt-auto">
+                <button class="p-3 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition-colors" title="Settings">
+                    <i data-lucide="settings" class="w-6 h-6"></i>
+                </button>
+            </div>
+        </aside>
+
+        <!-- Content Area -->
+        <div class="flex-1 flex overflow-hidden relative">
+            
+            <!-- Tab: SCAN -->
+            <div id="tab-scan" class="absolute inset-0 flex bg-slate-950 tab-content z-0">
+                <!-- Controls -->
+                <div class="w-72 bg-slate-900 border-r border-slate-800 flex flex-col p-4 gap-6 overflow-y-auto shrink-0">
+                    
+                    <!-- Project Info -->
+                    <div class="space-y-2">
+                        <h3 class="text-xs uppercase font-bold text-slate-500 tracking-wider">Project Info</h3>
+                        <div class="space-y-2">
+                            <div class="space-y-1">
+                                <label class="text-[10px] text-slate-400">Material Name</label>
+                                <input type="text" id="scan-name" placeholder="Auto-generated if empty" class="w-full bg-slate-800 border border-slate-700 rounded p-2 text-sm text-white focus:border-blue-500 outline-none">
+                            </div>
+                            <div class="space-y-1">
+                                <label class="text-[10px] text-slate-400">Tags (comma separated)</label>
+                                <input type="text" id="scan-tags" placeholder="e.g. fabric, cotton, red" class="w-full bg-slate-800 border border-slate-700 rounded p-2 text-sm text-white focus:border-blue-500 outline-none">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Device Selection -->
+                    <div class="space-y-2">
+                        <h3 class="text-xs uppercase font-bold text-slate-500 tracking-wider">Device</h3>
+                        <div class="flex gap-2 bg-slate-800 p-1 rounded-lg">
+                            <label class="flex-1 cursor-pointer">
+                                <input type="radio" name="device" value="mi13" class="peer hidden" checked>
+                                <div class="text-center py-2 rounded text-sm text-slate-400 peer-checked:bg-leica-red peer-checked:text-white transition-all">
+                                    Mi 13 Pro
+                                </div>
+                            </label>
+                            <label class="flex-1 cursor-pointer">
+                                <input type="radio" name="device" value="z30" class="peer hidden">
+                                <div class="text-center py-2 rounded text-sm text-slate-400 peer-checked:bg-nikon-blue peer-checked:text-white transition-all">
+                                    Nikon Z30
+                                </div>
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- Camera Settings (Nikon Z30 Only) -->
+                    <div id="camera-settings" class="space-y-2 hidden border-t border-b border-slate-800 py-2">
+                        <h3 class="text-xs uppercase font-bold text-slate-500 tracking-wider">Camera Settings</h3>
+                        <div class="grid grid-cols-2 gap-2">
+                            <div class="space-y-1">
+                                <label class="text-[10px] text-slate-400">ISO</label>
+                                <select id="cam-iso" class="w-full bg-slate-800 border border-slate-700 rounded p-1 text-xs text-white focus:border-blue-500 outline-none">
+                                    <option value="100">100</option>
+                                    <option value="200">200</option>
+                                    <option value="400">400</option>
+                                    <option value="800">800</option>
+                                    <option value="1600">1600</option>
+                                </select>
+                            </div>
+                            <div class="space-y-1">
+                                <label class="text-[10px] text-slate-400">Aperture</label>
+                                <select id="cam-aperture" class="w-full bg-slate-800 border border-slate-700 rounded p-1 text-xs text-white focus:border-blue-500 outline-none">
+                                    <option value="2.8">f/2.8</option>
+                                    <option value="4">f/4</option>
+                                    <option value="5.6" selected>f/5.6</option>
+                                    <option value="8">f/8</option>
+                                    <option value="11">f/11</option>
+                                    <option value="16">f/16</option>
+                                </select>
+                            </div>
+                            <div class="space-y-1 col-span-2">
+                                <label class="text-[10px] text-slate-400">Shutter Speed</label>
+                                <select id="cam-shutter" class="w-full bg-slate-800 border border-slate-700 rounded p-1 text-xs text-white focus:border-blue-500 outline-none">
+                                    <option value="1/30">1/30</option>
+                                    <option value="1/50">1/50</option>
+                                    <option value="1/100" selected>1/100</option>
+                                    <option value="1/200">1/200</option>
+                                    <option value="1/400">1/400</option>
+                                </select>
+                            </div>
+                            <div class="space-y-1 col-span-2">
+                                <label class="text-[10px] text-slate-400">Image Size</label>
+                                <select id="cam-imagesize" class="w-full bg-slate-800 border border-slate-700 rounded p-1 text-xs text-white focus:border-blue-500 outline-none">
+                                    <option value="Large">Loading...</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Device Info (Mi 13 Pro) -->
+                    <div id="device-info" class="space-y-2 hidden border-t border-b border-slate-800 py-2">
+                        <h3 class="text-xs uppercase font-bold text-slate-500 tracking-wider">Device Info</h3>
+                        <div class="space-y-1">
+                            <label class="text-[10px] text-slate-400">Image Size Capability</label>
+                            <div id="info-imagesize" class="text-xs text-slate-300 font-mono">Checking...</div>
+                        </div>
+                    </div>
+
+                    <div class="space-y-2">
+                        <h3 class="text-xs uppercase font-bold text-slate-500 tracking-wider">Scan Mode</h3>
+                        <div class="space-y-1">
+                            <label class="flex items-center gap-2 p-2 rounded hover:bg-slate-800 cursor-pointer">
+                                <input type="radio" name="scan_mode" value="single" class="accent-bg" checked>
+                                <span class="text-sm">Single Shot</span>
+                            </label>
+                            <label class="flex items-center gap-2 p-2 rounded hover:bg-slate-800 cursor-pointer">
+                                <input type="radio" name="scan_mode" value="focus_stack" class="accent-bg" id="focus-stack-mode">
+                                <span class="text-sm">Focus Stacking (Macro)</span>
+                            </label>
+                            <label class="flex items-center gap-2 p-2 rounded hover:bg-slate-800 cursor-pointer">
+                                <input type="radio" name="scan_mode" value="photometric" class="accent-bg" id="scan-box-mode">
+                                <span class="text-sm">Photometric (PBR Box)</span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <div class="space-y-2">
+                        <h3 class="text-xs uppercase font-bold text-slate-500 tracking-wider">Map Selection</h3>
+                        <div class="space-y-1">
+                            <label class="flex items-center gap-2 p-2 rounded hover:bg-slate-800 cursor-pointer">
+                                <input type="checkbox" class="accent-bg map-checkbox" value="normal" checked>
+                                <span class="text-sm">Normal Map</span>
+                            </label>
+                            <label class="flex items-center gap-2 p-2 rounded hover:bg-slate-800 cursor-pointer">
+                                <input type="checkbox" class="accent-bg map-checkbox" value="displacement" checked>
+                                <span class="text-sm">Displacement</span>
+                            </label>
+                            <label class="flex items-center gap-2 p-2 rounded hover:bg-slate-800 cursor-pointer">
+                                <input type="checkbox" class="accent-bg map-checkbox" value="roughness" checked>
+                                <span class="text-sm">Roughness</span>
+                            </label>
+                            <label class="flex items-center gap-2 p-2 rounded hover:bg-slate-800 cursor-pointer">
+                                <input type="checkbox" class="accent-bg map-checkbox" value="ao" checked>
+                                <span class="text-sm">Ambient Occlusion</span>
+                            </label>
+                            <label class="flex items-center gap-2 p-2 rounded hover:bg-slate-800 cursor-pointer">
+                                <input type="checkbox" class="accent-bg map-checkbox" value="metallic">
+                                <span class="text-sm">Metallic</span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <div class="space-y-4 border-t border-slate-800 pt-2">
+                        <h3 class="text-xs uppercase font-bold text-slate-500 tracking-wider">Scanning Parameters</h3>
+                        <div class="space-y-2">
+                            <div class="flex justify-between text-xs items-end">
+                                <span>ROI Size</span>
+                                <div class="flex items-center gap-2">
+                                    <button id="btn-live-preview" class="text-[10px] px-2 py-1 bg-slate-800 hover:bg-slate-700 rounded border border-slate-600 flex items-center gap-1 transition-colors" title="Open Live View to select ROI">
+                                        <i data-lucide="monitor" class="w-3 h-3"></i> Live
+                                    </button>
+                                    <span id="roi-value" class="accent-text font-bold">10 x 10 cm</span>
+                                </div>
+                            </div>
+                            <input type="range" min="5" max="30" value="10" step="1" 
+                                class="w-full h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-bg" 
+                                id="roi-slider">
+                        </div>
+                        
+                        <!-- ROI Position (D-Pad) -->
+                        <div class="space-y-2">
+                            <div class="flex justify-between text-xs">
+                                <span>ROI Position</span>
+                                <span class="text-slate-500 text-[10px]">(Adjust Center)</span>
+                            </div>
+                            <div class="flex flex-col items-center gap-1">
+                                <button class="w-8 h-8 rounded bg-slate-800 hover:bg-slate-700 flex items-center justify-center roi-btn" data-dir="up">
+                                    <i data-lucide="chevron-up" class="w-4 h-4"></i>
+                                </button>
+                                <div class="flex gap-1">
+                                    <button class="w-8 h-8 rounded bg-slate-800 hover:bg-slate-700 flex items-center justify-center roi-btn" data-dir="left">
+                                        <i data-lucide="chevron-left" class="w-4 h-4"></i>
+                                    </button>
+                                    <div class="w-8 h-8 rounded bg-slate-900 border border-slate-700 flex items-center justify-center">
+                                        <i data-lucide="crosshair" class="w-4 h-4 text-slate-500"></i>
+                                    </div>
+                                    <button class="w-8 h-8 rounded bg-slate-800 hover:bg-slate-700 flex items-center justify-center roi-btn" data-dir="right">
+                                        <i data-lucide="chevron-right" class="w-4 h-4"></i>
+                                    </button>
+                                </div>
+                                <button class="w-8 h-8 rounded bg-slate-800 hover:bg-slate-700 flex items-center justify-center roi-btn" data-dir="down">
+                                    <i data-lucide="chevron-down" class="w-4 h-4"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mt-auto pt-4 border-t border-slate-800">
+                        <button id="btn-scan" class="w-full py-4 rounded-lg accent-bg text-white font-bold text-lg shadow-lg hover:brightness-110 active:scale-95 transition-all flex items-center justify-center gap-2 group">
+                            <i data-lucide="aperture" class="group-hover:rotate-180 transition-transform duration-500"></i>
+                            <span>START SCAN</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Preview -->
+                <div class="flex-1 flex flex-col relative">
+                    <div class="flex-1 p-4 overflow-auto bg-slate-950" id="result-container">
+                        <div class="flex flex-col items-center justify-center h-full text-slate-600 gap-4" id="placeholder-view">
+                            <i data-lucide="box" class="w-16 h-16 opacity-20"></i>
+                            <p>Ready to Scan</p>
+                        </div>
+                        <div class="grid grid-cols-3 gap-4 hidden" id="maps-grid"></div>
+                    </div>
+                    <!-- Footer -->
+                    <footer class="h-8 bg-slate-900 border-t border-slate-800 flex items-center px-4 text-xs justify-between shrink-0">
+                        <span id="status-text">Idle</span>
+                        <div class="w-64 h-2 bg-slate-800 rounded-full overflow-hidden hidden" id="progress-container">
+                            <div class="h-full accent-bg w-0 transition-all duration-300" id="progress-bar"></div>
+                        </div>
+                    </footer>
+                </div>
+            </div>
+
+            <!-- Tab: HISTORY (New 3-Pane Layout) -->
+            <div id="tab-history" class="absolute inset-0 bg-slate-950 tab-content hidden z-0 flex flex-col overflow-hidden">
+                <!-- Top Toolbar -->
+                <div class="h-12 border-b border-slate-800 bg-slate-900 flex items-center justify-between px-4 shrink-0">
+                    <h2 class="text-lg font-bold shrink-0">Scan History</h2>
+                    <div class="flex items-center gap-2">
+                        <button id="refresh-history" class="p-2 hover:bg-slate-800 rounded text-slate-400 hover:text-white"><i data-lucide="refresh-cw" class="w-4 h-4"></i></button>
+                    </div>
+                </div>
+
+                <!-- Main Content Area (3 Panes) -->
+                <div class="flex-1 flex overflow-hidden" id="history-panes-container">
+                    
+                    <!-- Pane 1: List (25%) -->
+                    <div id="pane-history-list" class="w-1/4 min-w-[200px] flex flex-col bg-slate-900/50">
+                        <!-- Search & Filter Header -->
+                        <div class="p-3 border-b border-slate-800 space-y-2">
+                            <div class="relative">
+                                <input type="text" id="history-search" placeholder="Search..." class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500 pl-8">
+                                <i data-lucide="search" class="absolute left-2 top-2 w-4 h-4 text-slate-500"></i>
+                            </div>
+                            <div class="flex gap-2">
+                                <select id="filter-date" class="flex-1 bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-white">
+                                    <option value="all">All Time</option>
+                                    <option value="today">Today</option>
+                                    <option value="week">This Week</option>
+                                </select>
+                                <input type="text" id="filter-tags" placeholder="Tags..." class="flex-1 bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-white">
+                            </div>
+                        </div>
+                        
+                        <!-- List Container -->
+                        <div class="flex-1 overflow-y-auto p-2 space-y-2" id="history-list-container">
+                            <!-- List Items will be injected here -->
+                            <div class="text-center text-slate-500 text-sm mt-4">Loading...</div>
+                        </div>
+                    </div>
+
+                    <!-- Resizer 1 -->
+                    <div id="resizer-1" class="w-1 bg-slate-800 hover:bg-blue-500 cursor-col-resize transition-colors shrink-0 z-20"></div>
+
+                    <!-- Pane 2: Maps Preview (35%) -->
+                    <div id="pane-maps-preview" class="w-[35%] min-w-[200px] flex flex-col bg-slate-950">
+                        <div class="h-8 border-b border-slate-800 flex items-center px-3 bg-slate-900/50">
+                            <h3 class="text-xs font-bold uppercase text-slate-500">Maps Preview</h3>
+                        </div>
+                        <div class="flex-1 overflow-y-auto p-4" id="maps-preview-container">
+                            <div class="flex flex-col items-center justify-center h-full text-slate-600 gap-2">
+                                <i data-lucide="image" class="w-12 h-12 opacity-20"></i>
+                                <p class="text-sm">Select an item to view maps</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Resizer 2 -->
+                    <div id="resizer-2" class="w-1 bg-slate-800 hover:bg-blue-500 cursor-col-resize transition-colors shrink-0 z-20"></div>
+
+                    <!-- Pane 3: 3D View (40%) -->
+                    <div id="pane-3d-preview" class="flex-1 min-w-[200px] flex flex-col relative bg-black">
+                        <div class="absolute top-2 left-2 z-10 flex gap-2">
+                            <div class="bg-slate-900/80 rounded px-2 py-1 text-xs text-white backdrop-blur border border-slate-700 font-bold">
+                                3D Preview
+                            </div>
+                        </div>
+                        
+                        <!-- 3D Controls Overlay -->
+                        <div class="absolute bottom-4 left-4 right-4 z-10 bg-slate-900/90 p-3 rounded-lg backdrop-blur border border-slate-700 flex flex-wrap gap-4 items-end">
+                            <div class="space-y-1 flex-1 min-w-[100px]">
+                                <label class="text-[10px] text-slate-400">Geometry</label>
+                                <select id="geometry-select" class="w-full bg-slate-800 border border-slate-700 rounded p-1 text-xs text-white">
+                                    <option value="plane">Plane (Fabric)</option>
+                                    <option value="sphere">Sphere</option>
+                                    <option value="cube">Cube</option>
+                                </select>
+                            </div>
+                            <div class="space-y-1 flex-1 min-w-[100px]">
+                                <label class="text-[10px] text-slate-400">Displacement</label>
+                                <input type="range" min="0" max="2" step="0.1" value="0.5" id="preview-disp-scale" class="w-full h-1 bg-slate-700 rounded appearance-none cursor-pointer accent-bg">
+                            </div>
+                            <div class="space-y-1 flex-1 min-w-[100px]">
+                                <label class="text-[10px] text-slate-400">Normal</label>
+                                <input type="range" min="0.1" max="5.0" step="0.1" value="1.0" id="preview-normal-strength" class="w-full h-1 bg-slate-700 rounded appearance-none cursor-pointer accent-bg">
+                            </div>
+                             <div class="space-y-1 flex-1 min-w-[100px]">
+                                <label class="text-[10px] text-slate-400">Light Intensity</label>
+                                <input type="range" min="0" max="3" step="0.1" value="1.0" id="preview-light-intensity" class="w-full h-1 bg-slate-700 rounded appearance-none cursor-pointer accent-bg">
+                            </div>
+                        </div>
+
+                        <!-- Canvas Container -->
+                        <div id="canvas-container" class="w-full h-full cursor-move"></div>
+                    </div>
+
+                </div>
+            </div>
+
+            <!-- Tab: 3D VIEW (Legacy - Hidden/Removed) -->
+            <!-- <div id="tab-3d" ...> Removed as integrated into History -->
+
+        </div>
+    </main>
+
+    <!-- Live Preview Modal -->
+    <div id="preview-modal" class="fixed inset-0 z-50 bg-black/90 hidden flex items-center justify-center">
+        <div class="bg-slate-900 border border-slate-800 rounded-lg w-[90vw] h-[90vh] flex flex-col relative">
+            <!-- Header -->
+            <div class="h-12 border-b border-slate-800 flex items-center justify-between px-4">
+                <div class="font-bold flex items-center gap-2">
+                    <i data-lucide="crosshair" class="w-4 h-4 text-green-500"></i>
+                    Select ROI
+                </div>
+                <div class="flex items-center gap-2">
+                    <span id="preview-roi-info" class="text-xs text-slate-400 font-mono">Drag to select</span>
+                    <button id="btn-refresh-preview" class="p-2 hover:bg-slate-800 rounded text-slate-400 hover:text-white" title="Refresh">
+                        <i data-lucide="refresh-ccw" class="w-4 h-4"></i>
+                    </button>
+                    <button id="btn-close-preview" class="p-2 hover:bg-slate-800 rounded text-slate-400 hover:text-white" title="Close">
+                        <i data-lucide="x" class="w-5 h-5"></i>
+                    </button>
+                </div>
+            </div>
+            
+            <!-- Content -->
+            <div class="flex-1 overflow-hidden relative bg-black flex items-center justify-center" id="preview-modal-content">
+                <canvas id="preview-canvas" class="max-w-full max-h-full cursor-crosshair border border-slate-700"></canvas>
+                <div id="loading-preview" class="absolute inset-0 flex items-center justify-center bg-black/50 hidden">
+                    <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-white"></div>
+                </div>
+            </div>
+            
+            <!-- Footer -->
+            <div class="h-14 border-t border-slate-800 flex items-center justify-between px-4">
+                <div class="text-xs text-slate-500">
+                    Click & Drag to define custom scan area.
+                </div>
+                <div class="flex gap-2">
+                    <button id="btn-clear-roi" class="px-4 py-2 rounded bg-slate-800 hover:bg-slate-700 text-sm">Clear</button>
+                    <button id="btn-confirm-roi" class="px-4 py-2 rounded bg-green-600 hover:bg-green-700 text-white font-bold text-sm">Confirm ROI</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Reprocess Modal -->
+    <div id="reprocess-modal" class="fixed inset-0 z-50 bg-black/90 hidden flex items-center justify-center">
+        <div class="bg-slate-900 border border-slate-800 rounded-lg w-[500px] max-w-[90vw] flex flex-col shadow-2xl">
+            <!-- Header -->
+            <div class="h-12 border-b border-slate-800 flex items-center justify-between px-4 bg-slate-800/50">
+                <h3 class="font-bold text-lg">Reprocess Scan</h3>
+                <button id="btn-close-reprocess" class="p-2 hover:bg-slate-800 rounded text-slate-400 hover:text-white">
+                    <i data-lucide="x" class="w-5 h-5"></i>
+                </button>
+            </div>
+            
+            <!-- Content -->
+            <div class="p-6 space-y-6 overflow-y-auto max-h-[70vh]">
+                <input type="hidden" id="reprocess-filename">
+                
+                <div class="space-y-4">
+                     <h4 class="text-xs uppercase font-bold text-slate-500 tracking-wider">Parameters</h4>
+                     
+                     <!-- Normal Strength -->
+                     <div class="space-y-1">
+                         <div class="flex justify-between text-xs text-slate-300">
+                             <span>Normal Strength</span>
+                             <span id="reprocess-val-normal">1.0</span>
+                         </div>
+                         <input type="range" min="0.1" max="5.0" step="0.1" value="1.0" class="w-full h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-bg" id="reprocess-normal-strength">
+                     </div>
+
+                     <!-- Roughness Levels -->
+                     <div class="space-y-1">
+                         <div class="flex justify-between text-xs text-slate-300">
+                             <span>Roughness Min/Max</span>
+                             <span id="reprocess-val-roughness">0 - 255</span>
+                         </div>
+                         <div class="flex gap-2">
+                             <input type="number" min="0" max="255" value="0" class="w-1/2 bg-slate-800 border border-slate-700 rounded p-1 text-sm text-white" id="reprocess-roughness-min">
+                             <input type="number" min="0" max="255" value="255" class="w-1/2 bg-slate-800 border border-slate-700 rounded p-1 text-sm text-white" id="reprocess-roughness-max">
+                         </div>
+                     </div>
+
+                     <!-- Displacement Contrast -->
+                     <div class="space-y-1">
+                         <div class="flex justify-between text-xs text-slate-300">
+                             <span>Disp. Contrast</span>
+                             <span id="reprocess-val-disp">1.0</span>
+                         </div>
+                         <input type="range" min="0.1" max="5.0" step="0.1" value="1.0" class="w-full h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-bg" id="reprocess-disp-contrast">
+                     </div>
+                </div>
+
+                <div class="space-y-2">
+                    <h4 class="text-xs uppercase font-bold text-slate-500 tracking-wider">Maps to Regenerate</h4>
+                    <div class="grid grid-cols-2 gap-2 text-sm">
+                        <label class="flex items-center gap-2"><input type="checkbox" class="accent-bg reprocess-map-check" value="normal" checked> Normal</label>
+                        <label class="flex items-center gap-2"><input type="checkbox" class="accent-bg reprocess-map-check" value="displacement" checked> Displacement</label>
+                        <label class="flex items-center gap-2"><input type="checkbox" class="accent-bg reprocess-map-check" value="roughness" checked> Roughness</label>
+                        <label class="flex items-center gap-2"><input type="checkbox" class="accent-bg reprocess-map-check" value="ao" checked> AO</label>
+                        <label class="flex items-center gap-2"><input type="checkbox" class="accent-bg reprocess-map-check" value="metallic"> Metallic</label>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Footer -->
+            <div class="p-4 border-t border-slate-800 flex justify-end gap-2 bg-slate-800/50">
+                <button id="btn-cancel-reprocess" class="px-4 py-2 rounded bg-slate-700 hover:bg-slate-600 text-sm">Cancel</button>
+                <button id="btn-confirm-reprocess" class="px-4 py-2 rounded bg-blue-600 hover:bg-blue-700 text-white font-bold text-sm">Process</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/main.js?v=4"></script>
+    <script>
+        lucide.createIcons();
+    </script>
+</body>
+</html>
