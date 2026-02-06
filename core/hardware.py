@@ -5,216 +5,284 @@ import cv2
 import numpy as np
 import subprocess
 import shutil
+import exifread
 from .adb_handler import ADBHandler
 
 class NikonHandler:
     def __init__(self):
         self.connected = False
-        self.use_mock = True
-        self.check_gphoto2_availability()
+        self.backend = 'mock' # 'digicamcontrol', 'gphoto2', 'mock'
+        self.digicam_path = self._find_digicamcontrol()
+        self.manual_lens = True # TTArtisan 40mm f/2.8 Macro is Manual Focus
+        self.detect_backend()
         
-    def check_gphoto2_availability(self):
-        """Check if gphoto2 is installed and available in PATH"""
-        if shutil.which("gphoto2"):
-            self.use_mock = False
-            print("GPhoto2 found. Using real camera driver.")
-        else:
-            self.use_mock = True
-            print("GPhoto2 NOT found. Using Mock mode.")
+    def _find_digicamcontrol(self):
+        """Locate CameraControlCmd.exe"""
+        # Common paths
+        paths = [
+            r"C:\Program Files (x86)\DigiCamControl\CameraControlCmd.exe",
+            r"C:\Program Files\DigiCamControl\CameraControlCmd.exe",
+            os.path.join(os.getcwd(), "tools", "DigiCamControl", "CameraControlCmd.exe")
+        ]
+        for p in paths:
+            if os.path.exists(p):
+                return p
+        return None
 
-    def run_gphoto2_command(self, args):
-        """Run a gphoto2 command and return output"""
-        if self.use_mock:
-            return None
-            
+    def detect_backend(self):
+        """Check available backends"""
+        if self.digicam_path:
+            self.backend = 'digicamcontrol'
+            print(f"DigiCamControl found at {self.digicam_path}")
+        elif shutil.which("gphoto2"):
+            self.backend = 'gphoto2'
+            print("GPhoto2 found.")
+        else:
+            self.backend = 'mock'
+            print("No camera driver found. Using Mock mode.")
+        
+        # Override if user forces mock via env or something? No, keep it simple.
+        # But allow fallback if device not connected? 
+        # No, backend detection is about software availability. 
+        # check_connection handles device presence.
+
+    def run_command(self, args):
+        """Run backend specific command"""
+        if self.backend == 'digicamcontrol':
+            return self._run_digicam(args)
+        elif self.backend == 'gphoto2':
+            return self._run_gphoto2(args)
+        return None
+
+    def _run_digicam(self, args):
         try:
-            cmd = ["gphoto2"] + args
-            # Add timeout to prevent hanging
-            result = subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=10)
+            # CameraControlCmd.exe /filename ... /capture
+            cmd = [self.digicam_path] + args
+            # subprocess list is safer
+            result = subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=20)
             return result.stdout.strip()
         except subprocess.TimeoutExpired:
-            print(f"GPhoto2 Command Timeout: {' '.join(args)}")
-            return None
-        except subprocess.CalledProcessError as e:
-            print(f"GPhoto2 Error: {e.stderr}")
+            print(f"DigiCam Timeout: {args}")
             return None
         except Exception as e:
-            print(f"GPhoto2 Execution Error: {e}")
+            print(f"DigiCam Error: {e}")
             return None
 
+    def _run_gphoto2(self, args):
+        try:
+            cmd = ["gphoto2"] + args
+            result = subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=10)
+            return result.stdout.strip()
+        except Exception as e:
+            print(f"GPhoto2 Error: {e}")
+            return None
+
+    @property
+    def use_mock(self):
+        return self.backend == 'mock'
+
     def check_connection(self):
-        if self.use_mock:
+        if self.backend == 'mock':
             return {"connected": True, "device": "Nikon Z30 (Mock)", "color_theme": "nikon-blue"}
         
-        output = self.run_gphoto2_command(["--auto-detect"])
-        if output and "Nikon" in output: # Basic check, might need refinement based on output
-            self.connected = True
-            return {"connected": True, "device": "Nikon Z30", "color_theme": "nikon-blue"}
-        else:
-            self.connected = False
-            return {"connected": False, "device": "Disconnected", "color_theme": "nikon-blue"}
+        if self.backend == 'digicamcontrol':
+            # CameraControlCmd.exe /cameras
+            output = self.run_command(["/cameras"])
+            # If output contains "No camera", or is empty/error
+            if output and "No camera is connected" not in output:
+                 return {"connected": True, "device": "Nikon Z30 (DCC)", "color_theme": "nikon-blue"}
+        
+        if self.backend == 'gphoto2':
+            output = self.run_command(["--auto-detect"])
+            if output and "Nikon" in output:
+                return {"connected": True, "device": "Nikon Z30", "color_theme": "nikon-blue"}
+            
+        return {"connected": False, "device": "Disconnected", "color_theme": "nikon-blue"}
 
     def set_config(self, config_name, value):
-        if self.use_mock:
+        # Handle Manual Lens Limitations
+        if self.manual_lens and config_name in ['aperture', 'focus']:
+            print(f"Skipping {config_name} set for Manual Lens (TTArtisan 40mm)")
+            return True # Pretend success to not break workflow
+
+        if self.backend == 'mock':
             print(f"Mock Set {config_name} to {value}")
             return True
             
-        # Example: gphoto2 --set-config iso=100
-        output = self.run_gphoto2_command(["--set-config", f"{config_name}={value}"])
-        return output is not None
+        if self.backend == 'digicamcontrol':
+            # Map common names to DCC commands
+            cmd_map = {
+                'iso': '/iso',
+                'aperture': '/aperture',
+                'shutterspeed': '/shutter',
+                'imagesize': '/imagesize' 
+            }
+            if config_name in cmd_map:
+                self.run_command([cmd_map[config_name], str(value)])
+                return True
+            return False
+
+        if self.backend == 'gphoto2':
+            output = self.run_command(["--set-config", f"{config_name}={value}"])
+            return output is not None
+        return False
 
     def get_config(self, config_name):
-        if self.use_mock:
-            # Return dummy values for mock
-            defaults = {
-                "iso": "100",
-                "aperture": "5.6",
-                "shutterspeed": "1/100",
-                "imagesize": "Large"
-            }
+        if self.backend == 'mock':
+            defaults = {"iso": "100", "aperture": "5.6", "shutterspeed": "1/100", "imagesize": "Large"}
             return defaults.get(config_name, "N/A")
             
-        # Example output of --get-config iso:
-        # Label: ISO Speed
-        # Type: RADIO
-        # Current: 100
-        # Choice: 0 100
-        # ...
-        output = self.run_gphoto2_command(["--get-config", config_name])
-        if output:
-            current = None
-            choices = []
-            for line in output.split('\n'):
-                if line.startswith("Current:"):
-                    current = line.split("Current:")[1].strip()
-                if line.startswith("Choice:"):
-                    # Choice: 0 Large -> "Large"
-                    # Choice: 0 100 -> "100"
-                    parts = line.split("Choice:")[1].strip().split(" ")
-                    if len(parts) > 1:
-                        choices.append(" ".join(parts[1:]))
-                    else:
-                        choices.append(parts[0])
+        if self.backend == 'digicamcontrol':
+             # DCC doesn't easily return current value via CLI without /session or json
+             return "N/A (DCC)"
 
-            if config_name == 'imagesize' and choices:
-                # Return current and list of choices to imply we know the max
-                return f"{current} (Options: {', '.join(choices)})"
-                
-            return current
+        if self.backend == 'gphoto2':
+            output = self.run_command(["--get-config", config_name])
+            if output:
+                current = None
+                for line in output.split('\n'):
+                    if line.startswith("Current:"):
+                        current = line.split("Current:")[1].strip()
+                        return current
         return None
 
+    def get_focus_distance(self, image_path):
+        """
+        Reads Nikon Z-series absolute focus position from EXIF.
+        User info: Infinity ~0, MFD ~Large Integer.
+        """
+        if not os.path.exists(image_path):
+            return None
+            
+        try:
+            with open(image_path, 'rb') as f:
+                tags = exifread.process_file(f, details=False)
+                # Search for focus related tags
+                focus_info = {}
+                for tag in tags.keys():
+                    if "Focus" in tag:
+                        focus_info[tag] = str(tags[tag])
+                
+                # Try to find specific Nikon focus tags
+                # Common candidates: MakerNote FocusDistance, MakerNote FocusPosition
+                # Note: Exact tag name depends on exifread's mapping for Z series
+                return focus_info
+        except Exception as e:
+            print(f"Error reading EXIF: {e}")
+            return None
+
     def capture_preview(self, save_path):
-        if self.use_mock:
-            # Generate dummy preview
+        if self.backend == 'mock':
             img = np.zeros((400, 600, 3), dtype=np.uint8)
             img[:] = (50, 50, 50)
             cv2.putText(img, "Nikon Z30 Preview", (100, 200), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
             cv2.imwrite(save_path, img)
             return save_path
 
-        try:
-            # gphoto2 --capture-preview --force-overwrite --filename ...
-            cmd = ["gphoto2", "--capture-preview", "--force-overwrite", "--filename", os.path.basename(save_path)]
-            subprocess.run(cmd, check=True, cwd=os.path.dirname(save_path), timeout=10)
-            return save_path
-        except subprocess.TimeoutExpired:
-            print("Preview Timeout")
+        if self.backend == 'digicamcontrol':
+            # DCC: Try capturing a small jpeg?
+            print("Preview not supported in simple DCC CLI mode")
             return None
-        except Exception as e:
-            print(f"Preview failed: {e}")
-            return None
+
+        if self.backend == 'gphoto2':
+            try:
+                cmd = ["gphoto2", "--capture-preview", "--force-overwrite", "--filename", os.path.basename(save_path)]
+                subprocess.run(cmd, check=True, cwd=os.path.dirname(save_path), timeout=10)
+                return save_path
+            except:
+                return None
+        return None
 
     def drive_focus(self, step_size):
         """
         Drive lens focus. 
         step_size: 
-            - Integer: +ve for Near, -ve for Far. Magnitude = speed/amount (1=Small, 2=Medium, 3=Large).
-            - String: "Near 1", "Far 2", etc.
+            - Integer: +ve for Near, -ve for Far. 
         """
-        if self.use_mock:
+        if self.manual_lens:
+            print("Manual Lens detected. Skipping drive_focus.")
+            return False
+
+        if self.backend == 'mock':
             print(f"Mock Focus Drive: {step_size}")
             return True
             
-        try:
-            value = None
-            if isinstance(step_size, str):
-                # Normalize string: "near 1" -> "Near 1"
-                parts = step_size.strip().split()
-                if len(parts) == 2:
-                    direction = parts[0].capitalize() # Near/Far
-                    level = parts[1]
-                    if direction in ["Near", "Far"] and level in ["1", "2", "3"]:
-                         value = f"{direction} {level}"
-            
-            if not value and isinstance(step_size, int):
-                # Heuristic mapping for integers
-                # Nikon Z series typically supports: Near 1, Near 2, Near 3, Far 1, Far 2, Far 3
-                # 1=Small, 2=Medium, 3=Large
-                
-                mag = abs(step_size)
-                level = 1
-                if mag >= 80: level = 3
-                elif mag >= 30: level = 2
-                
-                direction = "Near" if step_size > 0 else "Far"
-                value = f"{direction} {level}"
-            
-            if not value:
-                 value = str(step_size)
+        if self.backend == 'digicamcontrol':
+            # CameraControlCmd.exe /focus <step>
+            try:
+                # DCC uses integer steps. 
+                # Need to map logic if needed, but usually just pass int.
+                val = int(step_size)
+                self.run_command(["/focus", str(val)])
+                return True
+            except:
+                return False
 
-            print(f"Driving Focus: {value}")
-            # gphoto2 --set-config manualfocusdrive="Near 1"
-            self.run_gphoto2_command(["--set-config", f"manualfocusdrive={value}"])
-            return True
-        except Exception as e:
-            print(f"Focus drive failed: {e}")
-            return False
+        if self.backend == 'gphoto2':
+            try:
+                # Use previous logic for gphoto2
+                value = None
+                if isinstance(step_size, int):
+                    mag = abs(step_size)
+                    level = 1
+                    if mag >= 80: level = 3
+                    elif mag >= 30: level = 2
+                    direction = "Near" if step_size > 0 else "Far"
+                    value = f"{direction} {level}"
+                else:
+                    value = str(step_size)
+
+                self.run_command(["--set-config", f"manualfocusdrive={value}"])
+                return True
+            except:
+                return False
+        return False
 
     def capture_and_pull(self, upload_folder):
-        if self.use_mock:
-            print("Nikon Z30 (Mock): Capturing...")
-            time.sleep(1)
-            timestamp = int(time.time())
-            filename = f"scan_{timestamp}.jpg"
-            filepath = os.path.join(upload_folder, filename)
-            
-            # Create dummy high-quality image
-            img = np.zeros((1000,1000,3), dtype=np.uint8)
-            img[:] = (100, 100, 140) # Nikon blue tint
-            cv2.putText(img, "Nikon Z30 Capture", (100, 500), cv2.FONT_HERSHEY_SIMPLEX, 2, (255,255,255), 3)
-            
-            # Add mock metadata text
-            cv2.putText(img, "ISO: 100 f/5.6 1/100", (100, 600), cv2.FONT_HERSHEY_SIMPLEX, 1, (200,200,200), 2)
-            
-            cv2.imwrite(filepath, img)
-            return filepath
-        
-        # Real Capture
-        print("Nikon Z30: Capturing...")
         timestamp = int(time.time())
         filename = f"scan_{timestamp}.jpg"
         filepath = os.path.join(upload_folder, filename)
+
+        if self.backend == 'mock':
+            print("Nikon Z30 (Mock): Capturing...")
+            time.sleep(1)
+            img = np.zeros((1000,1000,3), dtype=np.uint8)
+            img[:] = (100, 100, 140) 
+            cv2.putText(img, "Nikon Z30 Capture", (100, 500), cv2.FONT_HERSHEY_SIMPLEX, 2, (255,255,255), 3)
+            cv2.imwrite(filepath, img)
+            return filepath
         
-        # gphoto2 --capture-image-and-download --filename "..."
-        # Note: --filename argument behavior depends on version, often requires absolute path or pattern
-        # Easier to capture to current dir then move
+        print("Nikon Z30: Capturing...")
         
-        try:
-            # Capture and download to current directory
-            cmd = ["gphoto2", "--capture-image-and-download", "--force-overwrite", "--filename", filename]
-            subprocess.run(cmd, check=True, cwd=upload_folder, timeout=20) # Run inside upload folder to save directly there
-            
-            if os.path.exists(filepath):
-                return filepath
-            else:
-                print("Error: File not found after capture")
+        if self.backend == 'digicamcontrol':
+            # CameraControlCmd.exe /filename "C:\path\to\file.jpg" /capture
+            try:
+                # DCC requires absolute path
+                abs_path = os.path.abspath(filepath)
+                self.run_command(["/filename", abs_path, "/capture"])
+                
+                # Wait for file
+                for _ in range(20): # Wait up to 10s
+                    if os.path.exists(abs_path):
+                         if os.path.getsize(abs_path) > 0:
+                             time.sleep(0.5) 
+                             return abs_path
+                    time.sleep(0.5)
                 return None
-        except subprocess.TimeoutExpired:
-            print("Capture Timeout")
-            return None
-        except Exception as e:
-            print(f"Capture failed: {e}")
-            return None
+            except Exception as e:
+                print(f"DCC Capture Error: {e}")
+                return None
+
+        if self.backend == 'gphoto2':
+            try:
+                cmd = ["gphoto2", "--capture-image-and-download", "--force-overwrite", "--filename", filename]
+                subprocess.run(cmd, check=True, cwd=upload_folder, timeout=20)
+                if os.path.exists(filepath):
+                    return filepath
+                return None
+            except:
+                return None
+        return None
 
 class HardwareController:
     def __init__(self, upload_folder='scans'):
@@ -246,6 +314,23 @@ class HardwareController:
         else:
             # print(f"Mock Light: {index}")
             pass
+
+    def drive_rail(self, step):
+        """
+        Drive Macro Rail via Arduino (if available)
+        step: +ve (Forward), -ve (Backward)
+        Protocol: 'M:step' (Example)
+        """
+        if self.arduino:
+            try:
+                cmd = f"M:{step}\n"
+                self.arduino.write(cmd.encode())
+                time.sleep(1.0) # Wait for movement
+                return True
+            except Exception as e:
+                print(f"Error driving rail: {e}")
+                return False
+        return False
 
     def get_device_handler(self, device_type):
         if device_type == 'z30':
@@ -282,10 +367,21 @@ class HardwareController:
             print(f"Shifting focus step {i+1}...")
             
             if device_type == 'z30':
-                # Drive Focus Motor
-                device.drive_focus(focus_step) 
-                time.sleep(1.5) # Wait for motor and vibration to settle
+                # For Manual Lens without Rail, we DO NOT shift focus in software.
+                # User requested single shot for this lens.
+                if device.manual_lens and not self.arduino:
+                     print("Manual Lens (No Rail): Skipping focus shift loop. Capture once only.")
+                     break 
+
+                # Try Rail first if configured
+                moved = False
+                if self.arduino: 
+                    moved = self.drive_rail(focus_step)
                 
+                if not moved and not device.manual_lens:
+                    device.drive_focus(focus_step) 
+                    time.sleep(1.5)
+            
             elif device_type == 'mi13' or device_type == 'adb':
                 # ADB Swipe for focus
                 # Configurable or hardcoded for Mi 13 Pro

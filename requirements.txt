@@ -4,3 +4,4 @@ numpy
 pyserial
 Pillow
 adbutils
+pyinstaller

@@ -1,7 +1,17 @@
 import os
 import time
+import sys
 import subprocess
 from datetime import datetime
+
+def resource_path(relative_path):
+    """ Get absolute path to resource, works for dev and for PyInstaller """
+    try:
+        # PyInstaller creates a temp folder and stores path in _MEIPASS
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+    return os.path.join(base_path, relative_path)
 
 class ADBHandler:
     def __init__(self):
@@ -10,9 +20,17 @@ class ADBHandler:
         
         # Setup ADB path if local adb exists
         self.adb_exe = "adb" # Default to PATH
-        local_adb = os.path.join(os.getcwd(), 'platform-tools', 'adb.exe')
+        
+        # Check bundled path (PyInstaller) or local path
+        local_adb = resource_path(os.path.join('platform-tools', 'adb.exe'))
+        
         if os.path.exists(local_adb):
             self.adb_exe = local_adb
+        else:
+             # Fallback to current dir if not found in resource path (Dev mode sometimes)
+             local_adb_dev = os.path.join(os.getcwd(), 'platform-tools', 'adb.exe')
+             if os.path.exists(local_adb_dev):
+                 self.adb_exe = local_adb_dev
         
     def check_connection(self):
         """Kiểm tra thiết bị kết nối qua ADB sử dụng subprocess"""

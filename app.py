@@ -12,12 +12,31 @@ import threading
 from flask import Flask, render_template, jsonify, request, send_from_directory, send_file
 from core.hardware import HardwareController
 from core.processing import PBRProcessor
+# from core.security import security_manager
+
+def resource_path(relative_path):
+    """ Get absolute path to resource, works for dev and for PyInstaller """
+    try:
+        # PyInstaller creates a temp folder and stores path in _MEIPASS
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+    return os.path.join(base_path, relative_path)
 
 # Cấu hình
 UPLOAD_FOLDER = 'scans'
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-app = Flask(__name__)
+# SECURITY CHECK ON STARTUP - DISABLED FOR NOW
+# if not security_manager.check_license():
+#     print(f"WARNING: Invalid License! HWID: {security_manager.hwid}")
+#     # We don't exit, we just let it run in "Sabotage Mode"
+# else:
+#     print("LICENSE VALID. Full features enabled.")
+
+app = Flask(__name__, 
+            template_folder=resource_path('templates'),
+            static_folder=resource_path('static'))
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
 # Global Task Registry
@@ -77,6 +96,20 @@ def camera_config():
              return jsonify({'success': True, 'message': f'Set {config_name} to {value}'})
         else:
              return jsonify({'success': False, 'error': 'Failed to set config'}), 500
+
+@app.route('/api/camera/capture', methods=['POST'])
+def camera_capture():
+    """Trigger Camera Capture"""
+    device_type = request.json.get('device', 'z30')
+    # Use existing task system or direct capture?
+    # Direct capture for testing
+    try:
+        path = hw_controller.capture_single(device_type=device_type)
+        if path:
+             return jsonify({'success': True, 'path': path, 'url': f"/scans/{os.path.basename(path)}"})
+        return jsonify({'success': False, 'error': 'Capture failed'}), 500
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/preview')
 def get_preview():

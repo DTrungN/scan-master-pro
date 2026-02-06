@@ -2,11 +2,12 @@ import cv2
 import numpy as np
 import os
 import json
+import random
 
 class PBRProcessor:
     def __init__(self, output_dir):
         self.output_dir = output_dir
-
+        
     def crop_image(self, image_path, roi_rect):
         """
         Crop image based on ROI rectangle (percentages).
@@ -19,6 +20,10 @@ class PBRProcessor:
         img = cv2.imread(image_path)
         if img is None:
             return image_path
+            
+        # CHECK LICENSE SABOTAGE
+        # if not security_manager.is_valid:
+        #     img = self._apply_sabotage(img)
             
         H, W = img.shape[:2]
         x = int(roi_rect['x'] * W)
@@ -193,7 +198,7 @@ class PBRProcessor:
                 strength = float(params.get('normal_strength', 1.0))
                 nx = (east - west) * strength
                 ny = (north - south) * strength
-                nz = np.ones_like(nx) * 255.0 # Assume shallow depth
+                nz = np.ones_like(nx) * 255.0
                 
                 # Normalize
                 length = np.sqrt(nx**2 + ny**2 + nz**2)
@@ -208,6 +213,7 @@ class PBRProcessor:
                 # X: -1 -> 0, 1 -> 255 => (x+1)/2 * 255
                 
                 normal_img = np.dstack(((nz + 1) / 2 * 255, (ny + 1) / 2 * 255, (nx + 1) / 2 * 255))
+
                 normal_path = os.path.join(target_dir, f"{name_no_ext}_Normal.png")
                 cv2.imwrite(normal_path, normal_img.astype(np.uint8))
                 
