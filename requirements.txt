@@ -1,7 +1,0 @@
-Flask
-opencv-python-headless
-numpy
-pyserial
-Pillow
-adbutils
-pyinstaller

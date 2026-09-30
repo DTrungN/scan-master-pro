@@ -1,0 +1,8 @@
+{
+  "name": "Scan Master Pro",
+  "description": "Professional 3D material scanner and PBR texture map generator for fabric and surface materials with real-time 3D preview.",
+  "permissions": [],
+  "capabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

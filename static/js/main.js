@@ -117,6 +117,39 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
+    // Photometric Lighting Rig Controls
+    const lightBtns = document.querySelectorAll('.light-btn');
+    const activeLightLabel = document.getElementById('active-light-label');
+    const lightNames = {
+        '0': 'Đã tắt toàn bộ',
+        '1': 'Đèn 1: Hướng Bắc',
+        '2': 'Đèn 2: Hướng Đông',
+        '3': 'Đèn 3: Hướng Nam',
+        '4': 'Đèn 4: Hướng Tây',
+        '5': 'Bật cả 4 hướng'
+    };
+
+    lightBtns.forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const lightIdx = parseInt(btn.dataset.light, 10);
+            try {
+                lightBtns.forEach(b => b.classList.remove('bg-sky-600', 'text-white', 'border-sky-400'));
+                if (lightIdx !== 0) {
+                    btn.classList.add('bg-sky-600', 'text-white', 'border-sky-400');
+                }
+                if (activeLightLabel) activeLightLabel.textContent = lightNames[lightIdx] || `Đèn ${lightIdx}`;
+                
+                await fetch('/api/lights/control', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ index: lightIdx })
+                });
+            } catch (err) {
+                console.error("Lỗi gửi lệnh điều khiển đèn", err);
+            }
+        });
+    });
+
     // Tab Switching
     tabs.forEach(tab => {
         tab.addEventListener('click', () => {
@@ -137,48 +170,46 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
-    // Initial Check
-    // Initialize theme based on default checked radio
-    const defaultDevice = document.querySelector('input[name="device"]:checked').value;
-    if (defaultDevice === 'mi13') setTheme('leica-red');
-    if (defaultDevice === 'z30') setTheme('nikon-blue');
+    // Initial Check - Nikon Z6 + NIKKOR Z MC 50mm f/2.8 Exclusive
+    setTheme('nikon-blue');
 
     let isScanning = false; // Track scanning state
     const disconnectToast = document.getElementById('disconnect-toast');
     let scanPollInterval = null; // Store polling interval to clear it
 
     checkDeviceStatus();
+    loadHistory();
+    fetchCameraConfig();
     setInterval(checkDeviceStatus, 5000); // Poll every 5s
 
     async function checkDeviceStatus() {
         try {
-            const deviceType = document.querySelector('input[name="device"]:checked').value;
-            const res = await fetch(`/api/status?device=${deviceType}`);
+            const res = await fetch(`/api/status?device=z6`);
             const data = await res.json();
             
             if (data.connected) {
                 statusDot.classList.remove('bg-gray-500', 'bg-red-500');
-                statusDot.classList.add('bg-green-500');
-                deviceName.textContent = data.device;
+                statusDot.classList.add('bg-emerald-500');
+                deviceName.textContent = data.device || "Nikon Z6 + 50mm MC f/2.8";
                 
                 // Hide Toast
                 disconnectToast.classList.add('hidden');
             } else {
-                statusDot.classList.remove('bg-green-500');
+                statusDot.classList.remove('bg-emerald-500');
                 statusDot.classList.add('bg-gray-500');
-                deviceName.textContent = "Disconnected";
+                deviceName.textContent = "Chưa kết nối Nikon Z6";
 
                 // Show Toast
                 disconnectToast.classList.remove('hidden');
 
                 // Stop Scan if running
                 if (isScanning) {
-                    console.warn("Device disconnected during scan. Aborting...");
-                    abortScan("Device Disconnected");
+                    console.warn("Mất kết nối máy ảnh Nikon Z6 trong khi quét. Đang hủy...");
+                    abortScan("Mất kết nối máy ảnh Nikon Z6");
                 }
             }
         } catch (e) {
-            console.error("Status check failed", e);
+            console.error("Lỗi kiểm tra trạng thái thiết bị", e);
         }
     }
     
@@ -194,100 +225,47 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         // Reset UI
-        alert(`Scan Aborted: ${reason}`);
-        statusText.textContent = `Aborted: ${reason}`;
+        alert(`Quá trình quét bị hủy: ${reason}`);
+        statusText.textContent = `Bị hủy: ${reason}`;
         resetScanUI();
     }
 
-    // UI Interactions
-    deviceRadios.forEach(radio => {
-        radio.addEventListener('change', (e) => {
-            if (e.target.value === 'mi13') {
-                setTheme('leica-red');
-                if (cameraSettings) cameraSettings.classList.add('hidden');
-                if (deviceInfo) {
-                    deviceInfo.classList.remove('hidden');
-                    fetchDeviceInfo();
-                }
-            } else if (e.target.value === 'z30') {
-                setTheme('nikon-blue');
-                if (cameraSettings) cameraSettings.classList.remove('hidden');
-                if (deviceInfo) deviceInfo.classList.add('hidden');
-                fetchCameraConfig(); // Load current settings
-            }
-            checkDeviceStatus(); // Check status immediately on switch
-        });
-    });
-
-    // Device Info for Mi 13
-    async function fetchDeviceInfo() {
-        try {
-            const res = await fetch('/api/camera/config?device=mi13&config=imagesize');
-            const data = await res.json();
-            if (infoImageSize) {
-                infoImageSize.textContent = data.value || "Unknown";
-            }
-        } catch (e) {
-            console.error("Failed to load device info", e);
-        }
-    }
-
-    // Camera Configuration Logic
+    // Camera Configuration Logic for Nikon Z6 + 50mm MC f/2.8
     async function fetchCameraConfig() {
         try {
-            const res = await fetch('/api/camera/config?device=z30');
+            const res = await fetch('/api/camera/config?device=z6');
             const data = await res.json();
             if (data.iso && camIso) camIso.value = data.iso;
             if (data.aperture && camAperture) camAperture.value = data.aperture;
             if (data.shutterspeed && camShutter) camShutter.value = data.shutterspeed;
-            
-            // Handle Image Size (Parse string "Current (Options: ...)")
             if (data.imagesize && camImageSize) {
-                // Clear existing
-                camImageSize.innerHTML = '';
-                
-                const raw = data.imagesize;
-                // Format: "Large (Options: Large, Medium, Small)" or just "Large"
-                let current = raw;
-                let options = [raw];
-                
-                if (raw.includes("(Options:")) {
-                    const parts = raw.split("(Options:");
-                    current = parts[0].trim();
-                    const optsStr = parts[1].replace(')', '').trim();
-                    options = optsStr.split(',').map(s => s.trim());
+                for (let i = 0; i < camImageSize.options.length; i++) {
+                    if (camImageSize.options[i].value === data.imagesize) {
+                        camImageSize.selectedIndex = i;
+                        break;
+                    }
                 }
-                
-                // Populate
-                options.forEach(opt => {
-                    const el = document.createElement('option');
-                    el.value = opt;
-                    el.textContent = opt;
-                    if (opt === current) el.selected = true;
-                    camImageSize.appendChild(el);
-                });
             }
         } catch (e) {
-            console.error("Failed to load camera config", e);
+            console.error("Không thể tải cấu hình máy ảnh Nikon Z6", e);
         }
     }
 
     async function setCameraConfig(config, value) {
         try {
-            const res = await fetch('/api/camera/config?device=z30', {
+            const res = await fetch('/api/camera/config?device=z6', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ config, value })
             });
             const data = await res.json();
             if (!data.success) {
-                console.error("Failed to set config", data.error);
-                // Revert UI if failed (optional, for now just log)
+                console.error("Lỗi cài đặt thông số máy ảnh:", data.error);
             } else {
                 console.log(data.message);
             }
         } catch (e) {
-            console.error("Error setting config", e);
+            console.error("Lỗi gửi cấu hình máy ảnh", e);
         }
     }
 
@@ -295,6 +273,9 @@ document.addEventListener('DOMContentLoaded', () => {
         camIso.addEventListener('change', (e) => setCameraConfig('iso', e.target.value));
         camAperture.addEventListener('change', (e) => setCameraConfig('aperture', e.target.value));
         camShutter.addEventListener('change', (e) => setCameraConfig('shutterspeed', e.target.value));
+        if (camImageSize) {
+            camImageSize.addEventListener('change', (e) => setCameraConfig('imagesize', e.target.value));
+        }
     }
 
     roiSlider.addEventListener('input', (e) => {
@@ -309,7 +290,7 @@ document.addEventListener('DOMContentLoaded', () => {
         btnScan.classList.add('opacity-50', 'cursor-not-allowed');
         progressContainer.classList.remove('hidden');
         progressBar.style.width = '0%';
-        statusText.textContent = "Starting...";
+        statusText.textContent = "Đang kích hoạt màn trập Nikon Z6...";
         
         // Get Name
         const materialName = document.getElementById('scan-name').value;
@@ -318,8 +299,8 @@ document.addEventListener('DOMContentLoaded', () => {
         // Get selected maps
         const selectedMaps = Array.from(document.querySelectorAll('.map-checkbox:checked')).map(cb => cb.value);
 
-        // Get Scan Settings
-        const deviceType = document.querySelector('input[name="device"]:checked').value;
+        // Device is always Nikon Z6 + 50mm MC f/2.8
+        const deviceType = 'z6';
         const useScanBox = document.getElementById('scan-box-mode').checked;
         const useFocusStack = document.getElementById('focus-stack-mode') ? document.getElementById('focus-stack-mode').checked : false;
 
@@ -353,26 +334,26 @@ document.addEventListener('DOMContentLoaded', () => {
                     isScanning = false;
                     displayResults(finalResult.maps);
                     loadHistory();
-                    statusText.textContent = "Processing complete";
+                    statusText.textContent = "Hoàn tất quét & tạo bản đồ PBR!";
                     resetScanUI();
                 }, (error) => {
                     isScanning = false;
-                    alert('Error: ' + error);
-                    statusText.textContent = "Error occurred";
+                    alert('Lỗi chụp máy ảnh Nikon Z6: ' + error);
+                    statusText.textContent = "Có lỗi xảy ra";
                     resetScanUI();
                 });
             } else if (result.error) {
                 isScanning = false;
-                alert('Error: ' + result.error);
-                statusText.textContent = "Error occurred";
+                alert('Lỗi: ' + result.error);
+                statusText.textContent = "Có lỗi xảy ra";
                 resetScanUI();
             }
 
         } catch (error) {
             console.error(error);
             isScanning = false;
-            alert('Network Error');
-            statusText.textContent = "Network Error";
+            alert('Lỗi kết nối máy chủ');
+            statusText.textContent = "Lỗi kết nối";
             resetScanUI();
         }
     });
@@ -611,15 +592,15 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
         
-        // Add "Open Folder" or "Reprocess" actions if needed
+        // Action buttons: Reprocess and Download All
         const actions = document.createElement('div');
         actions.className = "mt-4 flex gap-2 justify-center";
         actions.innerHTML = `
-             <button class="px-3 py-1 bg-slate-800 hover:bg-slate-700 rounded text-xs border border-slate-700" onclick="alert('Reprocess feature coming soon')">
-                <i data-lucide="refresh-cw" class="w-3 h-3 inline mr-1"></i> Reprocess
+             <button class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 rounded text-xs border border-slate-700 flex items-center gap-1.5 text-slate-200 transition-colors" onclick="window.openReprocessModal('${item.folder_name}')">
+                <i data-lucide="sliders-horizontal" class="w-3.5 h-3.5 text-sky-400"></i> Tinh chỉnh & Tái tạo PBR
              </button>
-             <a href="/api/download/${item.id}" target="_blank" class="px-3 py-1 bg-blue-900/50 hover:bg-blue-900 rounded text-xs border border-blue-800 text-blue-200">
-                <i data-lucide="download" class="w-3 h-3 inline mr-1"></i> Download All
+             <a href="/api/download/${item.id}" target="_blank" class="px-3 py-1.5 bg-sky-900/50 hover:bg-sky-800 rounded text-xs border border-sky-700 text-sky-200 flex items-center gap-1.5 transition-colors">
+                <i data-lucide="download" class="w-3.5 h-3.5"></i> Tải trọn bộ bản đồ
              </a>
         `;
         
@@ -698,22 +679,42 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
     
+    // Progress UI Helpers
+    function showProgressUI(msg) {
+        if (progressContainer) progressContainer.classList.remove('hidden');
+        if (progressBar) progressBar.style.width = '0%';
+        if (statusText) statusText.textContent = msg || "Đang xử lý...";
+    }
+    
+    function hideProgressUI() {
+        setTimeout(() => {
+            if (progressContainer) progressContainer.classList.add('hidden');
+            if (progressBar) progressBar.style.width = '0%';
+        }, 1200);
+    }
+
     // Reprocess Modal Logic
     function openReprocessModal(filename) {
+        if (!reprocessModal) return;
         reprocessFilename.textContent = filename;
         reprocessModal.classList.remove('hidden');
-        reprocessModal.classList.add('flex'); // Ensure flex is added
+        reprocessModal.classList.add('flex');
         
-        // Reset defaults or load previous if we had them (optional)
-        // For now reset to defaults
         reprocessNormalStrength.value = 1.0;
         reprocessRoughnessMin.value = 0;
         reprocessRoughnessMax.value = 255;
         reprocessDispContrast.value = 1.0;
         
-        // Store filename on the confirm button for easy access
+        const normDisplay = document.getElementById('reprocess-val-normal');
+        if (normDisplay) normDisplay.textContent = '1.0';
+        const roughDisplay = document.getElementById('reprocess-val-roughness');
+        if (roughDisplay) roughDisplay.textContent = '0 - 255';
+        const dispDisplay = document.getElementById('reprocess-val-disp');
+        if (dispDisplay) dispDisplay.textContent = '1.0';
+        
         btnConfirmReprocess.dataset.filename = filename;
     }
+    window.openReprocessModal = openReprocessModal;
     
     if (btnCloseReprocess) {
         btnCloseReprocess.addEventListener('click', () => {
@@ -1137,8 +1138,8 @@ document.addEventListener('DOMContentLoaded', () => {
     async function loadPreview() {
         loadingPreview.classList.remove('hidden');
         try {
-            const deviceType = document.querySelector('input[name="device"]:checked').value;
-            // Add timestamp to prevent caching
+            const deviceInput = document.querySelector('input[name="device"]:checked');
+            const deviceType = deviceInput ? deviceInput.value : 'z6';
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), 15000); // 15s timeout
 
@@ -1149,7 +1150,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             if (!res.ok) {
                 const errData = await res.json().catch(() => ({}));
-                throw new Error(errData.error || "Failed to load preview");
+                throw new Error(errData.error || "Không thể tải Live View");
             }
             
             const blob = await res.blob();
@@ -1166,11 +1167,10 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (e) {
             console.error(e);
             loadingPreview.classList.add('hidden');
-            // Show more specific error if available from response logic
             if (e.name === 'AbortError') {
-                alert("Preview timed out. Device might be busy or disconnected.");
+                alert("Quá thời gian kết nối Live View từ Nikon Z6. Máy ảnh có thể đang bận.");
             } else {
-                alert("Could not load preview. " + (e.message || "Check connection."));
+                alert("Không thể tải Live View từ Nikon Z6. " + (e.message || "Vui lòng kiểm tra cáp kết nối."));
             }
         }
     }
